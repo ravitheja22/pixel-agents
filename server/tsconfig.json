@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "module": "Bundler",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "moduleResolution": "bundler",
+    "strict": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "types": ["bun-types"]
+  },
+  "include": ["*.ts"]
+}

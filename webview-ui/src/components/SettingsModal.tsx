@@ -1,12 +1,16 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { vscode } from '../vscodeApi.js'
 import { isSoundEnabled, setSoundEnabled } from '../notificationSound.js'
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const isStandalone = typeof (globalThis as any).acquireVsCodeApi !== 'function'
 
 interface SettingsModalProps {
   isOpen: boolean
   onClose: () => void
   isDebugMode: boolean
   onToggleDebugMode: () => void
+  launchDir?: string
 }
 
 const menuItemBase: React.CSSProperties = {
@@ -24,11 +28,68 @@ const menuItemBase: React.CSSProperties = {
   textAlign: 'left',
 }
 
-export function SettingsModal({ isOpen, onClose, isDebugMode, onToggleDebugMode }: SettingsModalProps) {
+export function SettingsModal({ isOpen, onClose, isDebugMode, onToggleDebugMode, launchDir }: SettingsModalProps) {
   const [hovered, setHovered] = useState<string | null>(null)
   const [soundLocal, setSoundLocal] = useState(isSoundEnabled)
+  const [launchDirInput, setLaunchDirInput] = useState(launchDir ?? '')
+
+  // Sync input when prop arrives for the first time (settingsLoaded message fires shortly after mount)
+  useEffect(() => {
+    if (launchDir !== undefined) {
+      setLaunchDirInput(launchDir)
+    }
+  }, [launchDir])
 
   if (!isOpen) return null
+
+  const commitLaunchDir = () => {
+    if (launchDirInput.trim()) {
+      vscode.postMessage({ type: 'setLaunchDir', dir: launchDirInput.trim() })
+    }
+  }
+
+  const handleImportLayout = () => {
+    onClose()
+    if (!isStandalone) {
+      vscode.postMessage({ type: 'importLayout' })
+      return
+    }
+    // Browser mode: read file client-side then send data to server
+    void (async () => {
+      try {
+        let text: string
+        const w = window as Window & {
+          showOpenFilePicker?: (opts?: unknown) => Promise<Array<{ getFile: () => Promise<File> }>>
+        }
+        if (typeof w.showOpenFilePicker === 'function') {
+          const [handle] = await w.showOpenFilePicker({
+            types: [{ description: 'JSON Files', accept: { 'application/json': ['.json'] } }],
+          })
+          const file = await handle.getFile()
+          text = await file.text()
+        } else {
+          text = await new Promise<string>((resolve, reject) => {
+            const input = document.createElement('input')
+            input.type = 'file'
+            input.accept = '.json,application/json'
+            input.onchange = () => {
+              const file = input.files?.[0]
+              if (file) {
+                void file.text().then(resolve)
+              } else {
+                reject(new Error('No file selected'))
+              }
+            }
+            input.click()
+          })
+        }
+        const parsed = JSON.parse(text) as Record<string, unknown>
+        if (parsed?.version === 1 && Array.isArray(parsed.tiles)) {
+          vscode.postMessage({ type: 'importLayout', layout: parsed })
+        }
+      } catch { /* user cancelled or invalid file */ }
+    })()
+  }
 
   return (
     <>
@@ -91,6 +152,32 @@ export function SettingsModal({ isOpen, onClose, isDebugMode, onToggleDebugMode 
             X
           </button>
         </div>
+        {/* Launch directory — only shown in standalone (browser) mode */}
+        {isStandalone && (
+          <div style={{ padding: '6px 10px', borderBottom: '1px solid var(--pixel-border)', marginBottom: '4px' }}>
+            <div style={{ fontSize: '20px', color: 'rgba(255, 255, 255, 0.6)', marginBottom: '4px' }}>
+              Launch Directory
+            </div>
+            <input
+              type="text"
+              value={launchDirInput}
+              onChange={(e) => setLaunchDirInput(e.target.value)}
+              onBlur={commitLaunchDir}
+              onKeyDown={(e) => { if (e.key === 'Enter') { commitLaunchDir(); e.currentTarget.blur() } }}
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                background: 'rgba(255, 255, 255, 0.06)',
+                border: '2px solid var(--pixel-border)',
+                borderRadius: 0,
+                color: 'rgba(255, 255, 255, 0.9)',
+                fontSize: '20px',
+                padding: '4px 6px',
+                outline: 'none',
+              }}
+            />
+          </div>
+        )}
         {/* Menu items */}
         <button
           onClick={() => {
@@ -121,10 +208,7 @@ export function SettingsModal({ isOpen, onClose, isDebugMode, onToggleDebugMode 
           Export Layout
         </button>
         <button
-          onClick={() => {
-            vscode.postMessage({ type: 'importLayout' })
-            onClose()
-          }}
+          onClick={handleImportLayout}
           onMouseEnter={() => setHovered('import')}
           onMouseLeave={() => setHovered(null)}
           style={{

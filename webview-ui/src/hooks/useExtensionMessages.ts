@@ -44,6 +44,7 @@ export interface ExtensionMessageState {
   subagentCharacters: SubagentCharacter[]
   layoutReady: boolean
   loadedAssets?: { catalog: FurnitureAsset[]; sprites: Record<string, string[][]> }
+  launchDir: string
 }
 
 function saveAgentSeats(os: OfficeState): void {
@@ -68,6 +69,7 @@ export function useExtensionMessages(
   const [subagentCharacters, setSubagentCharacters] = useState<SubagentCharacter[]>([])
   const [layoutReady, setLayoutReady] = useState(false)
   const [loadedAssets, setLoadedAssets] = useState<{ catalog: FurnitureAsset[]; sprites: Record<string, string[][]> } | undefined>()
+  const [launchDir, setLaunchDir] = useState<string>('')
 
   // Track whether initial layout has been loaded (ref to avoid re-render)
   const layoutReadyRef = useRef(false)
@@ -330,6 +332,9 @@ export function useExtensionMessages(
       } else if (msg.type === 'settingsLoaded') {
         const soundOn = msg.soundEnabled as boolean
         setSoundEnabled(soundOn)
+        if (typeof msg.launchDir === 'string') {
+          setLaunchDir(msg.launchDir)
+        }
       } else if (msg.type === 'furnitureAssetsLoaded') {
         try {
           const catalog = msg.catalog as FurnitureAsset[]
@@ -341,6 +346,34 @@ export function useExtensionMessages(
         } catch (err) {
           console.error(`❌ Webview: Error processing furnitureAssetsLoaded:`, err)
         }
+      } else if (msg.type === 'exportLayoutData') {
+        // Standalone server mode: server sends layout data, browser handles file save
+        const layout = msg.layout as Record<string, unknown>
+        try {
+          const w = window as unknown as { showSaveFilePicker?: (opts: unknown) => Promise<{ createWritable: () => Promise<{ write: (s: string) => Promise<void>; close: () => Promise<void> }> }> }
+          if (typeof w.showSaveFilePicker === 'function') {
+            // File System Access API (modern browsers)
+            w.showSaveFilePicker({
+              suggestedName: 'pixel-agents-layout.json',
+              types: [{ description: 'JSON Files', accept: { 'application/json': ['.json'] } }],
+            }).then(async (handle) => {
+              const writable = await handle.createWritable()
+              await writable.write(JSON.stringify(layout, null, 2))
+              await writable.close()
+            }).catch(() => { /* user cancelled */ })
+          } else {
+            // Fallback: <a download> for browsers without File System Access API
+            const blob = new Blob([JSON.stringify(layout, null, 2)], { type: 'application/json' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = 'pixel-agents-layout.json'
+            a.click()
+            URL.revokeObjectURL(url)
+          }
+        } catch (err) {
+          console.error('[Webview] Export layout failed:', err)
+        }
       }
     }
     window.addEventListener('message', handler)
@@ -348,5 +381,5 @@ export function useExtensionMessages(
     return () => window.removeEventListener('message', handler)
   }, [getOfficeState])
 
-  return { agents, selectedAgent, agentTools, agentStatuses, subagentTools, subagentCharacters, layoutReady, loadedAssets }
+  return { agents, selectedAgent, agentTools, agentStatuses, subagentTools, subagentCharacters, layoutReady, loadedAssets, launchDir }
 }
