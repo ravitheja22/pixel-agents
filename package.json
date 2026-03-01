@@ -61,8 +61,11 @@
     "lint": "eslint src",
     "import-tileset": "tsx scripts/import-tileset-cli.ts",
     "server:build": "cd webview-ui && npm run build:server",
+    "server:run": "cd server && bun index.ts",
     "server:dev": "npm run server:build && cd server && bun --watch index.ts",
-    "server:start": "npm run server:build && cd server && bun index.ts"
+    "server:start": "npm run server:build && cd server && bun index.ts",
+    "server:install": "bash scripts/install-service.sh",
+    "server:uninstall": "bash scripts/uninstall-service.sh"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.74.0",

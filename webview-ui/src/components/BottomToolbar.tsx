@@ -1,5 +1,12 @@
 import { useState } from 'react'
 import { SettingsModal } from './SettingsModal.js'
+import { vscode } from '../vscodeApi.js'
+import japandiLayout from '../assets/japandi-layout.json'
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const isStandalone = typeof (globalThis as any).acquireVsCodeApi !== 'function'
+
+type MapPreset = 'office' | 'zen'
 
 interface BottomToolbarProps {
   isEditMode: boolean
@@ -41,6 +48,38 @@ const btnActive: React.CSSProperties = {
   border: '2px solid var(--pixel-accent)',
 }
 
+async function applyPreset(preset: MapPreset, setMapPreset: (p: MapPreset) => void): Promise<void> {
+  let layout: Record<string, unknown>
+
+  if (preset === 'zen') {
+    layout = japandiLayout as unknown as Record<string, unknown>
+  } else {
+    // Office: reload default layout from server, or fall back to re-importing saved layout
+    try {
+      if (isStandalone) {
+        // Fetch the server's default layout — triggers reload via server broadcast
+        const res = await fetch('/assets/default-layout.json')
+        if (!res.ok) throw new Error('fetch failed')
+        layout = await res.json() as Record<string, unknown>
+      } else {
+        // In VS Code mode we can't reliably get the default layout; just skip
+        return
+      }
+    } catch {
+      return
+    }
+  }
+
+  // Apply immediately in-memory (works in both VS Code and browser)
+  window.dispatchEvent(new MessageEvent('message', { data: { type: 'layoutLoaded', layout } }))
+
+  // Persist to server (standalone only — VS Code extension doesn't support inline importLayout)
+  if (isStandalone) {
+    vscode.postMessage({ type: 'importLayout', layout })
+  }
+
+  setMapPreset(preset)
+}
 
 export function BottomToolbar({
   isEditMode,
@@ -52,6 +91,12 @@ export function BottomToolbar({
 }: BottomToolbarProps) {
   const [hovered, setHovered] = useState<string | null>(null)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [mapPreset, setMapPreset] = useState<MapPreset>('office')
+
+  const handleMapToggle = () => {
+    const next: MapPreset = mapPreset === 'office' ? 'zen' : 'office'
+    void applyPreset(next, setMapPreset)
+  }
 
   return (
     <div style={panelStyle}>
@@ -87,6 +132,22 @@ export function BottomToolbar({
         title="Edit office layout"
       >
         Layout
+      </button>
+      <button
+        onClick={handleMapToggle}
+        onMouseEnter={() => setHovered('map')}
+        onMouseLeave={() => setHovered(null)}
+        style={
+          mapPreset === 'zen'
+            ? { ...btnActive }
+            : {
+                ...btnBase,
+                background: hovered === 'map' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+              }
+        }
+        title={mapPreset === 'office' ? 'Switch to Zen Garden map' : 'Switch to Office map'}
+      >
+        {mapPreset === 'office' ? 'Office' : 'Zen'}
       </button>
       <div style={{ position: 'relative' }}>
         <button

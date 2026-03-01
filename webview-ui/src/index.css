@@ -7,6 +7,9 @@
 }
 
 :root {
+  /* Fallback for standalone browser mode where VS Code theme variables are not injected */
+  --vscode-foreground: rgba(255, 255, 255, 0.9);
+
   --pixel-bg: #1e1e2e;
   --pixel-border: #4a4a6a;
   --pixel-border-light: #6a6a8a;

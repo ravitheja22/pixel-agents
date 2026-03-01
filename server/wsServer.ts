@@ -286,8 +286,19 @@ export function startWsServer(resources: ServerResources): void {
 		doPersist,
 	);
 
-	// Seed known files and start project scanner
-	seedKnownFiles(res.knownJsonlFiles);
+	// Seed known files — actively-used sessions are adopted immediately; old ones just marked known
+	seedKnownFiles(
+		res.knownJsonlFiles,
+		res.nextAgentId,
+		res.agents,
+		res.fileWatchers,
+		res.pollingTimers,
+		res.waitingTimers,
+		res.permissionTimers,
+		sendFn,
+		doPersist,
+	);
+
 	startProjectScanner(
 		res.nextAgentId,
 		res.agents,

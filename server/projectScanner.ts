@@ -8,11 +8,30 @@ import type { SendFn } from './timerManager.js';
 
 const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 
+/** Sessions modified within this window are considered "active" and auto-adopted at startup */
+const ACTIVE_SESSION_THRESHOLD_MS = 60 * 60 * 1000; // 1 hour
+
 /**
- * Seed knownJsonlFiles with all existing JSONL files across all project dirs.
- * Called at startup so we only react to truly new sessions.
+ * Seed knownJsonlFiles with existing JSONL files across all project dirs.
+ * Files modified within the last hour are treated as active sessions and
+ * immediately adopted so they appear as characters on the map.
+ * Older files are just marked as known (to prevent future adoption).
  */
-export function seedKnownFiles(knownJsonlFiles: Set<string>): void {
+export function seedKnownFiles(
+	knownJsonlFiles: Set<string>,
+	nextAgentIdRef: { current: number },
+	agents: Map<number, AgentState>,
+	fileWatchers: Map<number, fs.FSWatcher>,
+	pollingTimers: Map<number, ReturnType<typeof setInterval>>,
+	waitingTimers: Map<number, ReturnType<typeof setTimeout>>,
+	permissionTimers: Map<number, ReturnType<typeof setTimeout>>,
+	send: SendFn | null,
+	persistAgents: () => void,
+): void {
+	const now = Date.now();
+	let adopted = 0;
+	let seeded = 0;
+
 	try {
 		const projectDirs = fs.readdirSync(CLAUDE_PROJECTS_DIR, { withFileTypes: true })
 			.filter(d => d.isDirectory())
@@ -23,11 +42,35 @@ export function seedKnownFiles(knownJsonlFiles: Set<string>): void {
 				const files = fs.readdirSync(dir)
 					.filter(f => f.endsWith('.jsonl'))
 					.map(f => path.join(dir, f));
-				for (const f of files) knownJsonlFiles.add(f);
+
+				for (const file of files) {
+					// Always mark as known so the scanner doesn't re-process it
+					knownJsonlFiles.add(file);
+
+					try {
+						const stat = fs.statSync(file);
+						const isRecent = now - stat.mtimeMs < ACTIVE_SESSION_THRESHOLD_MS;
+						const hasContent = stat.size > 0;
+
+						if (isRecent && hasContent) {
+							// Active session — adopt it so it shows up on the map
+							adoptNewSession(
+								file, dir, nextAgentIdRef,
+								agents, fileWatchers, pollingTimers, waitingTimers, permissionTimers,
+								send, persistAgents,
+							);
+							adopted++;
+						} else {
+							seeded++;
+						}
+					} catch {
+						seeded++;
+					}
+				}
 			} catch { /* dir may not be readable */ }
 		}
 
-		console.log(`[Scanner] Seeded ${knownJsonlFiles.size} known JSONL files`);
+		console.log(`[Scanner] Startup: adopted ${adopted} active session(s), seeded ${seeded} old session(s)`);
 	} catch {
 		// ~/.claude/projects/ may not exist yet
 		console.log(`[Scanner] No Claude projects dir found at ${CLAUDE_PROJECTS_DIR}`);
